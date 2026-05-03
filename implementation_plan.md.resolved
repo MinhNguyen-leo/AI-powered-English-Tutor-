@@ -1,0 +1,234 @@
+# AI-Powered English Tutor — End-to-End Implementation Plan
+
+## Overview
+
+Build a personalized AI English tutor targeting **IELTS learners (< 7.0 band)** with:
+- **Chat correction** — real-time grammar/vocab feedback
+- **Writing feedback** — essay/paragraph scoring and suggestions
+- **Memory system** — RAG-based personalization using past mistakes (FAISS + sentence-transformers)
+- **Full-stack delivery** — FastAPI backend + React frontend
+
+---
+
+## User Review Required
+
+> [!IMPORTANT]
+> **OpenAI API Key required.** You must provide a valid `OPENAI_API_KEY` before step 4 (Prompt System). The key will be stored in a `.env` file (never committed to git).
+
+> [!IMPORTANT]
+> **Model choice**: The plan defaults to `gpt-4o-mini` for cost efficiency. Should I use `gpt-4o` or `gpt-3.5-turbo` instead?
+
+> [!WARNING]
+> **FAISS on Windows**: `faiss-cpu` may require specific build tools. If installation fails, the plan falls back to `chromadb` as the vector store. Please confirm your Python version (`python --version`).
+
+> [!NOTE]
+> **Deployment**: Backend → Render (free tier), Frontend → Vercel (free tier). Both require GitHub-connected accounts. This is optional for the initial demo; local testing is sufficient first.
+
+---
+
+## Open Questions
+
+1. **Target user persona**: IELTS learner < 7.0 — should the tutor also support Vietnamese explanations alongside English?
+2. **Memory persistence**: Should errors be stored in-memory only (resets on restart) or persisted to SQLite/JSON file between sessions?
+3. **Authentication**: Do you need user accounts/login, or is a single-user demo sufficient?
+4. **Frontend framework**: The plan uses **React (Vite)**. Is this acceptable, or do you prefer plain HTML/JS?
+
+---
+
+## Proposed Changes
+
+### Phase 1 — Project Structure & Environment
+
+#### [NEW] Project root files
+
+```
+AI-powered-English-Tutor-/
+├── backend/
+│   ├── main.py              # FastAPI app entry point
+│   ├── routers/
+│   │   ├── chat.py          # /chat endpoint
+│   │   └── writing.py       # /writing endpoint
+│   ├── services/
+│   │   ├── ai_service.py    # OpenAI API calls + prompt building
+│   │   ├── memory.py        # Memory store (errors, user history)
+│   │   └── rag.py           # FAISS index + retrieval
+│   ├── models/
+│   │   └── schemas.py       # Pydantic request/response models
+│   ├── utils/
+│   │   └── logger.py        # Structured logging
+│   ├── data/                # Persisted memory JSON / SQLite
+│   └── requirements.txt
+├── frontend/
+│   └── (React Vite app)
+├── .env.example
+├── .gitignore
+└── README.md
+```
+
+---
+
+### Phase 2 — Backend Core (Steps 3–6)
+
+#### [NEW] `backend/requirements.txt`
+```
+fastapi
+uvicorn[standard]
+openai>=1.0.0
+python-dotenv
+pydantic
+sentence-transformers
+faiss-cpu
+numpy
+```
+
+#### [NEW] `backend/models/schemas.py`
+Pydantic models:
+- `ChatRequest` — `user_id: str`, `message: str`
+- `ChatResponse` — `corrected: str`, `explanation: str`, `score: dict`, `errors: list`
+- `WritingRequest` — `user_id: str`, `text: str`, `task_type: str` (Task 1 / Task 2)
+- `WritingResponse` — `feedback: str`, `corrections: list`, `band_estimate: float`
+
+#### [NEW] `backend/services/ai_service.py`
+- System prompt → instructs GPT to return **structured JSON** with fields: `corrected_text`, `errors[]`, `explanation`, `score`
+- `build_prompt(user_msg, context)` — injects retrieved RAG context into user prompt
+- `call_openai(prompt)` → returns parsed JSON response
+- Error handling if JSON parse fails (retry with stricter prompt)
+
+#### [NEW] `backend/routers/chat.py`
+- `POST /chat` — accepts `ChatRequest`, retrieves memory context, calls AI, updates memory, returns `ChatResponse`
+
+#### [NEW] `backend/routers/writing.py`
+- `POST /writing` — accepts `WritingRequest`, returns IELTS-style band estimate + corrections
+
+#### [NEW] `backend/main.py`
+- FastAPI app with CORS, includes routers, startup event to initialize FAISS index
+
+---
+
+### Phase 3 — Memory & RAG System (Steps 7–12)
+
+#### [NEW] `backend/services/memory.py`
+- In-memory dict `{user_id: [ErrorRecord]}`
+- `ErrorRecord` schema: `{user_id, error_type, original, corrected, explanation, timestamp}`
+- `add_error(user_id, record)` — saves to memory + optional JSON file
+- `get_user_errors(user_id)` → list of error strings for embedding
+
+#### [NEW] `backend/services/rag.py`
+- Uses `sentence-transformers` model: `all-MiniLM-L6-v2` (fast, lightweight)
+- `build_index(texts)` → FAISS `IndexFlatL2`
+- `add_to_index(text, user_id)` → embed + add to per-user index
+- `retrieve(query, user_id, top_k=3)` → returns top-k similar past errors as context string
+
+**RAG flow**:
+```
+User input → embed → FAISS search → top-3 past mistakes
+→ inject into system prompt → GPT response → extract new errors → store + re-embed
+```
+
+---
+
+### Phase 4 — Scoring & Evaluation (Step 14)
+
+Scoring rules (derived from AI JSON output):
+| Dimension | Score (0–9) |
+|-----------|-------------|
+| Grammar   | count of grammar errors |
+| Vocabulary | complexity + range |
+| Coherence  | structure analysis |
+
+- Simple band estimator: weighted average of sub-scores
+- Attached to both `/chat` and `/writing` responses
+
+---
+
+### Phase 5 — Frontend (Step 15)
+
+#### [NEW] `frontend/` — React + Vite app
+
+**Pages / Components**:
+- `ChatPage` — chat bubble UI, real-time corrections highlighted
+- `WritingPage` — textarea for essay input, shows IELTS band + annotated corrections
+- `HistoryPanel` — shows past errors and progress
+
+**Design**:
+- Dark mode, glassmorphism cards
+- Color palette: deep navy `#0f172a` + electric blue `#3b82f6` + emerald green `#10b981`
+- Google Font: Inter
+- Animated chat bubbles, score ring animation
+
+**API integration**:
+- `POST /chat` for chat mode
+- `POST /writing` for writing mode
+- Axios for HTTP
+
+---
+
+### Phase 6 — Logging, Deployment & Docs (Steps 17–20)
+
+#### [NEW] `backend/utils/logger.py`
+- Python `logging` module → structured JSON logs
+- Logs: `user_id`, `input`, `retrieved_context`, `ai_response`, `timestamp`
+- Optional: write to `backend/data/logs.jsonl`
+
+#### Deployment
+| Service | Platform | Config |
+|---------|----------|--------|
+| Backend | Render | `uvicorn backend.main:app --host 0.0.0.0 --port $PORT` |
+| Frontend | Vercel | Auto-detect Vite build |
+
+#### [MODIFY] `README.md`
+- Problem statement, architecture diagram (Mermaid), setup instructions, demo GIF
+
+---
+
+## Architecture Diagram
+
+```mermaid
+flowchart TD
+    U[User Input] --> FE[React Frontend]
+    FE -->|POST /chat| BE[FastAPI Backend]
+    BE --> RAG[RAG Service\nFAISS + sentence-transformers]
+    RAG -->|top-k context| BE
+    BE --> AI[OpenAI GPT-4o-mini]
+    AI -->|structured JSON| BE
+    BE --> MEM[Memory Service\nError Store]
+    MEM --> RAG
+    BE -->|ChatResponse| FE
+    FE --> UI[Highlighted Corrections\n+ Score Ring]
+```
+
+---
+
+## Verification Plan
+
+### Automated Tests
+- `pytest backend/tests/` — unit tests for prompt builder, JSON parser, RAG retrieval
+- Manual: `curl -X POST http://localhost:8000/chat -d '{"user_id":"test","message":"I goes to school"}'`
+
+### Manual Verification
+1. Submit a sentence with grammar errors → verify correction + JSON structure
+2. Submit the same error twice → verify RAG context shows it in the 2nd response
+3. Submit a 250-word IELTS Task 2 essay → verify band estimate + feedback
+4. Check logs in `backend/data/logs.jsonl`
+
+---
+
+## Execution Order
+
+| Step | Phase | Description |
+|------|-------|-------------|
+| 1 | Setup | Create folder structure + requirements.txt |
+| 2 | Setup | `.env` + `.gitignore` |
+| 3 | Backend | `schemas.py` + `main.py` skeleton |
+| 4 | Backend | `ai_service.py` + prompt design |
+| 5 | Backend | `/chat` router + test with curl |
+| 6 | Backend | JSON parsing + error handling |
+| 7 | Memory | `memory.py` + `rag.py` |
+| 8 | RAG | FAISS index + retrieval |
+| 9 | Backend | Inject RAG context into prompt |
+| 10 | Backend | `/writing` router + scoring |
+| 11 | Frontend | React Vite app + ChatPage |
+| 12 | Frontend | WritingPage + HistoryPanel |
+| 13 | Polish | Logging + edge cases |
+| 14 | Deploy | Render + Vercel |
+| 15 | Docs | README + architecture diagram |
