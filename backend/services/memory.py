@@ -115,3 +115,20 @@ def get_stats(user_id: str) -> dict:
         "total_errors": len(records),
         "error_breakdown": type_counts,
     }
+
+memory_store = {
+    "u1": [
+        {
+            "original": "...",
+            "corrected": "...",
+            "explanation": "...",
+            "error_type": "..."
+        }
+    ]
+}
+
+def get_errors(user_id: str):
+    """
+    Return full error records (list of dict)
+    """
+    return memory_store.get(user_id, [])

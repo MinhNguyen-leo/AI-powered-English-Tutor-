@@ -31,8 +31,8 @@ async def chat_endpoint(request: ChatRequest):
 
     # ── Step 1: ensure user's FAISS index is ready ──────────────────────────
     if user_id not in rag._indices:
-        error_texts = memory.get_error_texts(user_id)
-        rag.initialize_user_index(user_id, error_texts)
+        error_records = memory.get_user_errors(user_id)
+        rag.initialize_user_index(user_id, error_records)
 
     # ── Step 2: retrieve past-error context ──────────────────────────────────
     context = rag.retrieve_context(user_id, user_message, top_k=3)
@@ -68,13 +68,13 @@ async def chat_endpoint(request: ChatRequest):
 
     # ── Step 5: update memory ────────────────────────────────────────────────
     raw_errors = ai_result.get("errors", [])
+
+    # lưu DB
     memory.add_errors(user_id, raw_errors)
+
+    # 🔥 update RAG
     if raw_errors:
-        new_texts = [
-            f"{e.get('error_type','')}: \"{e.get('original','')}\" → \"{e.get('corrected','')}\" ({e.get('explanation','')})"
-            for e in raw_errors
-        ]
-        rag.add_texts_to_index(user_id, new_texts)
+        rag.add_errors_to_index(user_id, raw_errors)
 
     # ── Step 6: return ───────────────────────────────────────────────────────
     return ChatResponse(
